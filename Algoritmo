@@ -1,0 +1,362 @@
+# Carregamento de bibliotecas
+library(tidyverse)
+library(ggplot2)
+library(haven)
+library(psych)
+library(car)
+library(rstatix)
+
+# Localização do banco de dados
+setwd('G:/Meu Drive/Cursos/Docência/Doutorado em Educação/3_Tese/Dados/PNP')
+
+# Carregamento do banco de dados da PNP para 2021
+dados_2021 = read.csv2('2021_ano-base_microdados_eficiencia_academica_2022.csv')
+
+#################################### TÉCNICO INTEGRADO #####################################
+
+# Seleção dos dados dos cursos técnicos integrados presenciais do IFMS
+dados_2021_tec = dados_2021 %>%
+  # Tipo de curso
+  filter(Tipo.de.Curso == 'Técnico') %>%
+  # Tipo de Oferta
+  filter(Tipo.de.Oferta == 'Integrado') %>%
+  # Modalidade Presencial
+  filter(Modalidade.de.Ensino == 'Educação Presencial') %>%
+  # IFMS
+  filter(Instituição == 'IFMS') %>%
+  # Seleciona apenas situações de matrícula de interesse
+  filter((Situação.de.Matrícula == 'Abandono')|(Situação.de.Matrícula == 'Concluída')|
+           (Situação.de.Matrícula == 'Reprovado'))
+
+# Quantidades de estudantes por situação de matrícula e que não declararam renda ou raça
+quantidades = dados_2021_tec %>%
+  mutate(Renda.Familiar = ifelse(Renda.Familiar == 'Não declarada',1,0)) %>%
+  mutate(Faixa.Etária = ifelse(Faixa.Etária == 'S/I',1,0)) %>%
+  mutate(Cor...Raça = ifelse(Cor...Raça == 'Não declarada',1,0)) %>%
+  mutate(Evadidos = ifelse(Categoria.da.Situação == 'Evadidos',1,0)) %>%
+  mutate(Concluintes = ifelse(Categoria.da.Situação == 'Concluintes',1,0))
+quant_renda_na = sum(quantidades$Renda.Familiar)
+quant_raca_na = sum(quantidades$Cor...Raça)
+quant_idade_na = sum(quantidades$Faixa.Etária)
+quant_evadidos = sum(quantidades$Evadidos)
+quant_concluintes = sum(quantidades$Concluintes)
+summary(dados_2021_tec$Idade)
+
+# Tratamento dos dados
+dados_2021_tec2 = dados_2021_tec %>%
+  # Seleciona apenas idade diferente de NA
+  mutate(Faixa.Etária = ifelse(Faixa.Etária == 'S/I',1,0)) %>%
+  filter(Faixa.Etária == 0) %>%
+  # Seleciona apenas raça/cor declarada
+  filter(Cor...Raça != 'Não declarada') %>%
+  # Seleciona apenas renda declarada
+  filter(Renda.Familiar != 'Não declarada') %>%
+  #Seleciona variáveis de interesse
+  select(Cor...Raça,Idade,Renda.Familiar,Sexo,Situação.de.Matrícula) %>%
+  # Altera valores das variáveis
+  mutate(Renda.Familiar = ifelse(Renda.Familiar == '0<RFP<=0,5',0, Renda.Familiar)) %>%
+  mutate(Renda.Familiar = ifelse(Renda.Familiar == '0,5<RFP<=1,0',1, Renda.Familiar)) %>%
+  mutate(Renda.Familiar = ifelse(Renda.Familiar == '1,0<RFP<=1,5',2, Renda.Familiar)) %>%
+  mutate(Renda.Familiar = ifelse(Renda.Familiar == '1,5<RFP<=2,5',3, Renda.Familiar)) %>%
+  mutate(Renda.Familiar = ifelse(Renda.Familiar == '2,5<RFP<=3,5',4, Renda.Familiar)) %>%
+  mutate(Renda.Familiar = ifelse(Renda.Familiar == 'RFP>3,5', 5, Renda.Familiar)) %>%
+  mutate(Situação.de.Matrícula = ifelse(((Situação.de.Matrícula == 'Abandono')|
+                                           (Situação.de.Matrícula == 'Reprovado')),1,0)) %>%
+  # Altera nome das variáveis
+  rename(id = Idade, des = Situação.de.Matrícula, rfp = Renda.Familiar) %>%
+  # Cria colunas das dummies
+  mutate(fnbr = ifelse((((Cor...Raça == 'Amarela')|(Cor...Raça == 'Indígena')|
+                           (Cor...Raça == 'Parda')|(Cor...Raça == 'Preta'))&
+                          (Sexo == 'Feminino')),1,0)) %>%
+  mutate(mnbr = ifelse((((Cor...Raça == 'Amarela')|(Cor...Raça == 'Indígena')|
+                           (Cor...Raça == 'Parda')|(Cor...Raça == 'Preta'))&
+                          (Sexo == 'Masculino')),1,0)) %>%
+  mutate(mbr = ifelse(((Cor...Raça == 'Branca')&(Sexo == 'Masculino')),1,0)) %>%
+  mutate(fbr = ifelse(((Cor...Raça == 'Branca')&(Sexo == 'Feminino')),1,0)) %>%
+  # Altera tipo das variáveis para númerico
+  transform(rfp = as.numeric(rfp), des = as.numeric(des), fnbr = as.numeric(fnbr),
+            mnbr = as.numeric(mnbr), mbr = as.numeric(mbr), fbr = as.numeric(fbr))
+
+# Quantidade de estudantes da amostra de acordo com agrupamentos
+quant_fnbr_2021 = sum(dados_2021_tec2$fnbr)
+quant_mnbr_2021 = sum(dados_2021_tec2$mnbr)
+quant_mbr_2021 = sum(dados_2021_tec2$mbr)
+quant_fbr_2021 = sum(dados_2021_tec2$fbr)
+quant_evadidos_2021 = sum(dados_2021_tec2$des)
+total_2021 = quant_fnbr_2021 + quant_mnbr_2021 + quant_mbr_2021 + quant_fbr_2021
+
+# Estatísticas descritivas
+dados_2021_tec2 = as_tibble(dados_2021_tec2)
+summary(dados_2021_tec2$id)
+
+# Regressão logística
+fit <- glm(des ~ id + rfp + fnbr + mnbr + mbr, 
+           data = dados_2021_tec2, family = "binomial")
+summary(fit)
+
+## Razão de Chance
+odds_ratio = exp(fit$coefficients)
+round(odds_ratio, 4)
+
+## Teste de significância do Modelo
+qui_q_fit = list("Qui-quadrado_modelo" = fit$null.deviance - fit$deviance,
+                  "gl_modelo" = fit$df.null - fit$df.residual)
+qui_q_fit$prob = 1 - pchisq(qui_q_fit$`Qui-quadrado_modelo`, qui_q_fit$gl_modelo)
+qui_q_fit
+
+
+#################################### GRADUAÇÃO ############################################
+
+# Seleção dos dados das graduações presenciais do IFMS
+dados_2021_grad = dados_2021 %>%
+  # Tipo de curso
+  filter((Tipo.de.Curso == 'Bacharelado')|(Tipo.de.Curso == 'Licenciatura')|
+           (Tipo.de.Curso == 'Tecnologia')) %>%
+  # Modalidade Presencial
+  filter(Modalidade.de.Ensino == 'Educação Presencial') %>%
+  # IFMS
+  filter(Instituição == 'IFMS') %>%
+  # Seleciona apenas situações de matrícula de interesse
+  filter((Situação.de.Matrícula == 'Abandono')|(Situação.de.Matrícula == 'Concluída')|
+           (Situação.de.Matrícula == 'Reprovado'))
+
+# Quantidades de estudantes por situação de matrícula e que não declararam renda ou raça
+quantidades = dados_2021_grad %>%
+  mutate(Renda.Familiar = ifelse(Renda.Familiar == 'Não declarada',1,0)) %>%
+  mutate(Faixa.Etária = ifelse(Faixa.Etária == 'S/I',1,0)) %>%
+  mutate(Cor...Raça = ifelse(Cor...Raça == 'Não declarada',1,0)) %>%
+  mutate(Evadidos = ifelse(Categoria.da.Situação == 'Evadidos',1,0)) %>%
+  mutate(Concluintes = ifelse(Categoria.da.Situação == 'Concluintes',1,0))
+quant_renda_na = sum(quantidades$Renda.Familiar)
+quant_raca_na = sum(quantidades$Cor...Raça)
+quant_idade_na = sum(quantidades$Faixa.Etária)
+quant_evadidos = sum(quantidades$Evadidos)
+quant_concluintes = sum(quantidades$Concluintes)
+summary(dados_2021_grad$Idade)
+
+# Tratamento dos dados
+dados_2021_grad2 = dados_2021_grad %>%
+  # Seleciona apenas idade diferente de NA
+  mutate(Faixa.Etária = ifelse(Faixa.Etária == 'S/I',1,0)) %>%
+  filter(Faixa.Etária == 0) %>%
+  # Seleciona apenas raça/cor declarada
+  filter(Cor...Raça != 'Não declarada') %>%
+  # Seleciona apenas renda declarada
+  filter(Renda.Familiar != 'Não declarada') %>%
+  #Seleciona variáveis de interesse
+  select(Cor...Raça,Idade,Renda.Familiar,Sexo,Situação.de.Matrícula) %>%
+  # Altera valores das variáveis
+  mutate(Renda.Familiar = ifelse(Renda.Familiar == '0<RFP<=0,5',0, Renda.Familiar)) %>%
+  mutate(Renda.Familiar = ifelse(Renda.Familiar == '0,5<RFP<=1,0',1, Renda.Familiar)) %>%
+  mutate(Renda.Familiar = ifelse(Renda.Familiar == '1,0<RFP<=1,5',2, Renda.Familiar)) %>%
+  mutate(Renda.Familiar = ifelse(Renda.Familiar == '1,5<RFP<=2,5',3, Renda.Familiar)) %>%
+  mutate(Renda.Familiar = ifelse(Renda.Familiar == '2,5<RFP<=3,5',4, Renda.Familiar)) %>%
+  mutate(Renda.Familiar = ifelse(Renda.Familiar == 'RFP>3,5', 5, Renda.Familiar)) %>%
+  mutate(Situação.de.Matrícula = ifelse(((Situação.de.Matrícula == 'Abandono')|
+                                           (Situação.de.Matrícula == 'Reprovado')),1,0)) %>%
+  # Altera nome das variáveis
+  rename(id = Idade, des = Situação.de.Matrícula, rfp = Renda.Familiar) %>%
+  # Cria colunas das dummies
+  mutate(fnbr = ifelse((((Cor...Raça == 'Amarela')|(Cor...Raça == 'Indígena')|
+                           (Cor...Raça == 'Parda')|(Cor...Raça == 'Preta'))&
+                          (Sexo == 'Feminino')),1,0)) %>%
+  mutate(mnbr = ifelse((((Cor...Raça == 'Amarela')|(Cor...Raça == 'Indígena')|
+                           (Cor...Raça == 'Parda')|(Cor...Raça == 'Preta'))&
+                          (Sexo == 'Masculino')),1,0)) %>%
+  mutate(mbr = ifelse(((Cor...Raça == 'Branca')&(Sexo == 'Masculino')),1,0)) %>%
+  mutate(fbr = ifelse(((Cor...Raça == 'Branca')&(Sexo == 'Feminino')),1,0)) %>%
+  # Altera tipo das variáveis para númerico
+  transform(rfp = as.numeric(rfp), des = as.numeric(des), fnbr = as.numeric(fnbr),
+            mnbr = as.numeric(mnbr), mbr = as.numeric(mbr), fbr = as.numeric(fbr))
+
+# Quantidade de estudantes da amostra de acordo com agrupamentos
+quant_fnbr_2021 = sum(dados_2021_grad2$fnbr)
+quant_mnbr_2021 = sum(dados_2021_grad2$mnbr)
+quant_mbr_2021 = sum(dados_2021_grad2$mbr)
+quant_fbr_2021 = sum(dados_2021_grad2$fbr)
+quant_evadidos_2021 = sum(dados_2021_grad2$des)
+total_2021 = quant_fnbr_2021 + quant_mnbr_2021 + quant_mbr_2021 + quant_fbr_2021
+
+# Estatísticas descritivas
+dados_2021_grad2 = as_tibble(dados_2021_grad2)
+summary(dados_2021_grad2$id)
+
+# Regressão logística
+fit <- glm(des ~ id + rfp + fnbr + mnbr + mbr, 
+           data = dados_2021_grad2, family = "binomial")
+summary(fit)
+
+## Razão de Chance
+odds_ratio = exp(fit$coefficients)
+round(odds_ratio, 4)
+
+## Teste de significância do Modelo
+qui_q_fit = list("Qui-quadrado_modelo" = fit$null.deviance - fit$deviance,
+                 "gl_modelo" = fit$df.null - fit$df.residual)
+qui_q_fit$prob = 1 - pchisq(qui_q_fit$`Qui-quadrado_modelo`, qui_q_fit$gl_modelo)
+qui_q_fit
+
+
+#################################### TÉCNICO INTEGRADO #####################################
+
+# Seleção dos dados dos cursos técnicos integrados presenciais do IFMS
+dados_2021_tec3 = dados_2021 %>%
+  # Tipo de curso
+  filter(Tipo.de.Curso == 'Técnico') %>%
+  # Tipo de Oferta
+  filter(Tipo.de.Oferta == 'Integrado') %>%
+  # Modalidade Presencial
+  filter(Modalidade.de.Ensino == 'Educação Presencial') %>%
+  # IFMS
+  filter(Instituição == 'IFMS') %>%
+  # Seleciona apenas situações de matrícula de interesse
+  filter((Situação.de.Matrícula == 'Abandono')|(Situação.de.Matrícula == 'Concluída')|
+           (Situação.de.Matrícula == 'Reprovado'))
+
+# Quantidades de estudantes por situação de matrícula e que não declararam renda ou raça
+quantidades = dados_2021_tec3 %>%
+  mutate(Faixa.Etária = ifelse(Faixa.Etária == 'S/I',1,0)) %>%
+  mutate(Cor...Raça = ifelse(Cor...Raça == 'Não declarada',1,0)) %>%
+  mutate(Evadidos = ifelse(Categoria.da.Situação == 'Evadidos',1,0)) %>%
+  mutate(Concluintes = ifelse(Categoria.da.Situação == 'Concluintes',1,0))
+quant_raca_na = sum(quantidades$Cor...Raça)
+quant_idade_na = sum(quantidades$Faixa.Etária)
+quant_evadidos = sum(quantidades$Evadidos)
+quant_concluintes = sum(quantidades$Concluintes)
+summary(dados_2021_tec3$Idade)
+
+# Tratamento dos dados
+dados_2021_tec4 = dados_2021_tec3 %>%
+  # Seleciona apenas idade diferente de NA
+  mutate(Faixa.Etária = ifelse(Faixa.Etária == 'S/I',1,0)) %>%
+  filter(Faixa.Etária == 0) %>%
+  # Seleciona apenas raça/cor declarada
+  filter(Cor...Raça != 'Não declarada') %>%
+  #Seleciona variáveis de interesse
+  select(Cor...Raça,Idade,Sexo,Situação.de.Matrícula) %>%
+  # Altera valores das variáveis
+  mutate(Situação.de.Matrícula = ifelse(((Situação.de.Matrícula == 'Abandono')|
+                                           (Situação.de.Matrícula == 'Reprovado')),1,0)) %>%
+  # Altera nome das variáveis
+  rename(id = Idade, des = Situação.de.Matrícula) %>%
+  # Cria colunas das dummies
+  mutate(fnbr = ifelse((((Cor...Raça == 'Amarela')|(Cor...Raça == 'Indígena')|
+                           (Cor...Raça == 'Parda')|(Cor...Raça == 'Preta'))&
+                          (Sexo == 'Feminino')),1,0)) %>%
+  mutate(mnbr = ifelse((((Cor...Raça == 'Amarela')|(Cor...Raça == 'Indígena')|
+                           (Cor...Raça == 'Parda')|(Cor...Raça == 'Preta'))&
+                          (Sexo == 'Masculino')),1,0)) %>%
+  mutate(mbr = ifelse(((Cor...Raça == 'Branca')&(Sexo == 'Masculino')),1,0)) %>%
+  mutate(fbr = ifelse(((Cor...Raça == 'Branca')&(Sexo == 'Feminino')),1,0)) %>%
+  # Altera tipo das variáveis para númerico
+  transform(des = as.numeric(des), fnbr = as.numeric(fnbr),
+            mnbr = as.numeric(mnbr), mbr = as.numeric(mbr), fbr = as.numeric(fbr))
+
+# Quantidade de estudantes da amostra de acordo com agrupamentos
+quant_fnbr_2021 = sum(dados_2021_tec4$fnbr)
+quant_mnbr_2021 = sum(dados_2021_tec4$mnbr)
+quant_mbr_2021 = sum(dados_2021_tec4$mbr)
+quant_fbr_2021 = sum(dados_2021_tec4$fbr)
+quant_evadidos_2021 = sum(dados_2021_tec4$des)
+total_2021 = quant_fnbr_2021 + quant_mnbr_2021 + quant_mbr_2021 + quant_fbr_2021
+
+# Estatísticas descritivas
+dados_2021_tec4 = as_tibble(dados_2021_tec4)
+summary(dados_2021_tec4$id)
+
+# Regressão logística
+fit <- glm(des ~ id + fnbr + mnbr + mbr, 
+           data = dados_2021_tec4, family = "binomial")
+summary(fit)
+
+## Razão de Chance
+odds_ratio = exp(fit$coefficients)
+round(odds_ratio, 4)
+
+## Teste de significância do Modelo
+qui_q_fit = list("Qui-quadrado_modelo" = fit$null.deviance - fit$deviance,
+                 "gl_modelo" = fit$df.null - fit$df.residual)
+qui_q_fit$prob = 1 - pchisq(qui_q_fit$`Qui-quadrado_modelo`, qui_q_fit$gl_modelo)
+qui_q_fit
+
+
+#################################### GRADUAÇÃO ############################################
+
+# Seleção dos dados das graduações presenciais do IFMS
+dados_2021_grad3 = dados_2021 %>%
+  # Tipo de curso
+  filter((Tipo.de.Curso == 'Bacharelado')|(Tipo.de.Curso == 'Licenciatura')|
+           (Tipo.de.Curso == 'Tecnologia')) %>%
+  # Modalidade Presencial
+  filter(Modalidade.de.Ensino == 'Educação Presencial') %>%
+  # IFMS
+  filter(Instituição == 'IFMS') %>%
+  # Seleciona apenas situações de matrícula de interesse
+  filter((Situação.de.Matrícula == 'Abandono')|(Situação.de.Matrícula == 'Concluída')|
+           (Situação.de.Matrícula == 'Reprovado'))
+
+# Quantidades de estudantes por situação de matrícula e que não declararam renda ou raça
+quantidades = dados_2021_grad3 %>%
+  mutate(Faixa.Etária = ifelse(Faixa.Etária == 'S/I',1,0)) %>%
+  mutate(Cor...Raça = ifelse(Cor...Raça == 'Não declarada',1,0)) %>%
+  mutate(Evadidos = ifelse(Categoria.da.Situação == 'Evadidos',1,0)) %>%
+  mutate(Concluintes = ifelse(Categoria.da.Situação == 'Concluintes',1,0))
+quant_raca_na = sum(quantidades$Cor...Raça)
+quant_idade_na = sum(quantidades$Faixa.Etária)
+quant_evadidos = sum(quantidades$Evadidos)
+quant_concluintes = sum(quantidades$Concluintes)
+summary(dados_2021_grad3$Idade)
+
+# Tratamento dos dados
+dados_2021_grad4 = dados_2021_grad3 %>%
+  # Seleciona apenas idade diferente de NA
+  mutate(Faixa.Etária = ifelse(Faixa.Etária == 'S/I',1,0)) %>%
+  filter(Faixa.Etária == 0) %>%
+  # Seleciona apenas raça/cor declarada
+  filter(Cor...Raça != 'Não declarada') %>%
+  #Seleciona variáveis de interesse
+  select(Cor...Raça,Idade,Sexo,Situação.de.Matrícula) %>%
+  # Altera valores das variáveis
+  mutate(Situação.de.Matrícula = ifelse(((Situação.de.Matrícula == 'Abandono')|
+                                           (Situação.de.Matrícula == 'Reprovado')),1,0)) %>%
+  # Altera nome das variáveis
+  rename(id = Idade, des = Situação.de.Matrícula) %>%
+  # Cria colunas das dummies
+  mutate(fnbr = ifelse((((Cor...Raça == 'Amarela')|(Cor...Raça == 'Indígena')|
+                           (Cor...Raça == 'Parda')|(Cor...Raça == 'Preta'))&
+                          (Sexo == 'Feminino')),1,0)) %>%
+  mutate(mnbr = ifelse((((Cor...Raça == 'Amarela')|(Cor...Raça == 'Indígena')|
+                           (Cor...Raça == 'Parda')|(Cor...Raça == 'Preta'))&
+                          (Sexo == 'Masculino')),1,0)) %>%
+  mutate(mbr = ifelse(((Cor...Raça == 'Branca')&(Sexo == 'Masculino')),1,0)) %>%
+  mutate(fbr = ifelse(((Cor...Raça == 'Branca')&(Sexo == 'Feminino')),1,0)) %>%
+  # Altera tipo das variáveis para númerico
+  transform(des = as.numeric(des), fnbr = as.numeric(fnbr),
+            mnbr = as.numeric(mnbr), mbr = as.numeric(mbr), fbr = as.numeric(fbr))
+
+# Quantidade de estudantes da amostra de acordo com agrupamentos
+quant_fnbr_2021 = sum(dados_2021_grad4$fnbr)
+quant_mnbr_2021 = sum(dados_2021_grad4$mnbr)
+quant_mbr_2021 = sum(dados_2021_grad4$mbr)
+quant_fbr_2021 = sum(dados_2021_grad4$fbr)
+quant_evadidos_2021 = sum(dados_2021_grad4$des)
+total_2021 = quant_fnbr_2021 + quant_mnbr_2021 + quant_mbr_2021 + quant_fbr_2021
+
+# Estatísticas descritivas
+dados_2021_grad4 = as_tibble(dados_2021_grad4)
+summary(dados_2021_grad4$id)
+
+# Regressão logística
+fit <- glm(des ~ id + fnbr + mnbr + mbr, 
+           data = dados_2021_grad4, family = "binomial")
+summary(fit)
+
+## Razão de Chance
+odds_ratio = exp(fit$coefficients)
+round(odds_ratio, 4)
+
+## Teste de significância do Modelo
+qui_q_fit = list("Qui-quadrado_modelo" = fit$null.deviance - fit$deviance,
+                 "gl_modelo" = fit$df.null - fit$df.residual)
+qui_q_fit$prob = 1 - pchisq(qui_q_fit$`Qui-quadrado_modelo`, qui_q_fit$gl_modelo)
+qui_q_fit
